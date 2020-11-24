@@ -11,11 +11,9 @@ class FTPClient():
         self.__serverName    = serverName
         self.__serverPort    = int(serverPort)
         self.__sendSocket    = None
-        self.__receiveSocket = None
-        self.__receivePort   = None
 
     def __sendData(self, dataStr, commandStr, filenameStr):
-        clientLogger.info("Sending data to FTP server for command %s", commandStr)
+        clientLogger.debug("Sending data to FTP server for command %s", commandStr)
 
 		# Prepend spaces to the command string
 		# until the size is 5 bytes
@@ -25,14 +23,13 @@ class FTPClient():
             commandLen = len(commandStr)    
         clientLogger.debug("CommandStr to send is \"%s\"", commandStr)
 
-        filenameStr = ""
-        if commandStr.trim() == "get" or commandStr.trim() == "put":
+        if commandStr.strip() == "get" or commandStr.strip() == "put":
             # Prepend spaces to the filename string
             # until the size is 30 bytes
             filenameLen = len(filenameStr)
 
             if filenameLen > 50:
-                print("Error: filename too long, maximum filename length is 50")
+                clientLogger.Error("Error: filename too long, maximum filename length is 50")
                 return
 
             while filenameLen < 50:
@@ -45,61 +42,49 @@ class FTPClient():
 		# until the size is 10 bytes
         dataLen = len(dataStr)
         dataLenStr = str(dataLen)
-        clientLogger.debug("dataLenStr is: %d", dataLenStr)
+        clientLogger.debug("dataLenStr is: %s", dataLenStr)
         while len(dataLenStr) < 10:
             dataLenStr = "0" + dataLenStr
         
-        if commandStr.trim() == "ls":
+        if commandStr.strip() == "ls":
             dataStr = commandStr
-        elif commandStr.trim() == "get":
+        elif commandStr.strip() == "get":
             dataStr = commandStr + filenameStr
-        elif commandStr.trim() == "put":
+        elif commandStr.strip() == "put":
             dataStr = commandStr + filenameStr + dataLenStr + dataStr
 
+        dataToSend = dataStr.encode()
         sentDataLen = 0
         clientLogger.debug("Size of total data to send to FTP server: %d", len(dataStr))
-        while sentDataLen < len(dataStr):
+        while sentDataLen < len(dataToSend):
             clientLogger.debug("Begin to send data to FTP server")
             try:
-                sentDataLen += self.__sendSocket.send(dataStr[sentDataLen:])
+                sentDataLen += self.__sendSocket.send(dataToSend[sentDataLen:])
             except Exception as e:
+                self.__sendSocket.close()
                 clientLogger.error(e)
                 return
             clientLogger.debug("Size of data sent to FTP server: %d", sentDataLen)
 
     def __receiveData(self):
-            
-        print("Waiting for connections...")
-            
-        # Accept connections
-        serverSock, addr = self.__receiveSocket.accept()
-        
-        print("Accepted connection from server: ", addr)
-        print("\n")
-        
-        # The buffer to all data received from the
-        # the client.
-        fileData = ""
-        
-        # The size of the incoming file
-        fileSize = 0	
+        fileData = ""	
         
         # The buffer containing the file size
-        fileSizeBuff =  self.__recvAll(10)
+        fileSize =  self.__recvAll(10, self.__sendSocket)
             
         # Get the file size
-        fileSize = int(fileSizeBuff)
+        fileSize = int(fileSize.strip())
         
-        print("The file size is ", fileSize)
+        clientLogger.debug("The file size is %d", fileSize)
         
         # Get the file data
-        fileData = self.__recvAll(fileSize)
+        fileData = self.__recvAll(fileSize, self.__sendSocket)
         
-        print("All file data received.")
+        clientLogger.debug("All file data received.")
 
         return fileData
 
-    def __recvAll(self, receiveByteLen):
+    def __recvAll(self, receiveByteLen, serverSocket):
 
         # The buffer
         recvBuff = ""
@@ -111,34 +96,48 @@ class FTPClient():
         while len(recvBuff) < receiveByteLen:
             
             # Attempt to receive bytes
-            tmpBuff =  self.__receiveSocket.recv(receiveByteLen)
+            tmpBuff = serverSocket.recv(receiveByteLen).decode()
             
             # The other side has closed the socket
             if not tmpBuff:
                 break
             
             # Add the received bytes to the buffer
-            recvBuff += tmpBuff
+            recvBuff = recvBuff + tmpBuff
         
         return recvBuff
 
     def __uploadFile(self, filename):
-        with open("./ClientFiles/upload/" + filename, 'r') as file:
-            data = file.read()
-            self.__sendData(data, "put", filename)   
+        try:
+            print("Uploading file \"" + filename + "\" to FTP server...")
+            with open("./ClientFiles/upload/" + filename, 'r') as file:
+                data = file.read()
+                self.__sendData(data, "put", filename) 
+            print("Upload succeeded.") 
+        except Exception as e:
+            clientLogger.error(e) 
 
 
     def __downloadFile(self, filename):
-        self.__sendData("", "get", filename)
-        data = self.__receiveData()
-
-        with open("./ClientFiles/download/" + filename, 'w') as file:
-            file.write(data)   
+        try:
+            print("Downloading file \"" + filename + "\" from FTP server...", filename)
+            self.__sendData("", "get", filename)
+            fileData = self.__receiveData()
+            with open("./ClientFiles/download/" + filename, 'w') as file:
+                file.write(fileData) 
+            print("Download succeeded. File stored at directory /ClientFiles/download.")  
+        except Exception as e:
+            clientLogger.error(e) 
 
     def __listServerFiles(self):
         self.__sendData("", "ls", "")
-        serverFileInfo = self.__receiveData()
+        try:
+            serverFileInfo = self.__receiveData()
+        except Exception as e:
+            print(e)
+            return
 
+        print("Files on FTP server are:")
         print(serverFileInfo)
 
     def __createSocket(self):
@@ -150,37 +149,13 @@ class FTPClient():
         self.__sendSocket.connect((self.__serverName, self.__serverPort))
         clientLogger.debug("Client send socket created.")
 
-    def __initReceiveSocket(self):
-        self.__receiveSocket = self.__createSocket()
-        clientLogger.debug("Client receiving socket created.")
-
-        host = socket.gethostbyname(socket.gethostname())
-        self.__receiveSocket.bind((host, 0))
-        self.__receivePort = self.__receiveSocket.getsockname()[1]
-        clientLogger.debug("Client receiving socket binded to port %d",  self.__receivePort)
-
-        self.__receiveSocket.listen(1)
-
     def __destroySendSocket(self):
-        self.__sendSocket.close()
         self.__sendSocket = None 
         clientLogger.debug("Client send socket destroyed.") 
 
-    def __destroyReceiveSocket(self):
-        self.__receiveSocket.close()
-        self.__receiveSocket = None
-        self.__receivePort   = None
-        clientLogger.debug("Client receive socket destroyed.")
 
     def executeControlCommand(self, command):
         willStopClient = False
-
-        if self.__sendSocket == None:
-            clientLogger.debug("Creating client send socket.")
-            self.__sendSocket = self.__createSocket()
-        elif self.__receiveSocket == None:
-            clientLogger.debug("Creating client receive socket.")
-            self.__receiveSocket = self.__createSocket()
 
         operation = command[0]
         clientLogger.debug("Received client command: %s", operation)
@@ -188,12 +163,18 @@ class FTPClient():
         if len(command) == 2:
             filename = command[1]
             if operation == "get":
+                self.__initSendSocket()
                 self.__downloadFile(filename)
+                self.__destroySendSocket()
             elif operation == "put":
+                self.__initSendSocket()
                 self.__uploadFile(filename)
+                self.__destroySendSocket()
         else:
             if operation == "ls":
+                self.__initSendSocket()
                 self.__listServerFiles()
+                self.__destroySendSocket()
             elif operation == "quit":
                 self.stop()
                 willStopClient = True
@@ -203,13 +184,7 @@ class FTPClient():
     def start(self):
         if self.__sendSocket == None:
             self.__initSendSocket()
-        
-        if self.__receiveSocket == None:
-            self.__initReceiveSocket()
 
     def stop(self):
         if self.__sendSocket != None:
             self.__destroySendSocket()
-
-        if self.__receiveSocket != None:
-            self.__destroyReceiveSocket()

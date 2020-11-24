@@ -7,7 +7,7 @@ def startClient(client, serverName, serverPort):
     willExit = False
 
     while willExit != True:
-        commandStr = raw_input(">ftp ")
+        commandStr = input(">ftp ")
 
         clientLogger.debug("Input command is: %s", commandStr)
         
@@ -55,17 +55,16 @@ if __name__ == "__main__":
 
     try:
         startClient(client, serverName, serverPort)
+        print("Exiting FTP client program...")
     except KeyboardInterrupt:
         clientLogger.debug("Received keyboard inturrupt.")
         try:
             client.stop()
-            print("Exiting client program...")
+            clientLogger.info("Exiting FTP client program...")
             sys.exit(0)
         except SystemExit:
             os._exit(0)
     except Exception:
         client.stop()
         sys.exit(1)
-
-    print("Exiting client program...")
     

@@ -21,7 +21,7 @@ if __name__ == "__main__":
         serverLogger.debug("Received keyboard inturrupt.")
         try:
             server.stop()
-            serverLogger.info("Exiting server program...")
+            serverLogger.info("Exiting FTP server program...")
             sys.exit(0)
         except SystemExit:
             sys.exit(0)
