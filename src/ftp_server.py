@@ -141,8 +141,7 @@ class FTPServer():
         self.__serverSocket = self.__createSocket()
         serverLogger.debug("Server receiving socket created.")
 
-        host = socket.gethostbyname(socket.gethostname())
-        self.__serverSocket.bind((host, self.__serverPort))
+        self.__serverSocket.bind(('localhost', self.__serverPort))
         serverLogger.debug("Server receiving socket binded to port %d",  self.__serverPort)
 
         self.__serverSocket.listen(1)
