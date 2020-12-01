@@ -9,7 +9,7 @@ python3 server.py 5000
 *************************
 * How to run FTP client *
 *************************
-python3 server.py <Server IP Address> <Server Port Number>
+python3 cli.py <Server IP Address> <Server Port Number>
 
 E.g.
-python3 server.py 127.0.0.1 5000
+python3 cli.py 127.0.0.1 5000

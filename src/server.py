@@ -7,7 +7,7 @@ if __name__ == "__main__":
     # Command line checks 
     if len(sys.argv) < 2:
         print("Error: invalid command.")
-        print("USAGE: python " + sys.argv[0] + " <Server Port>")
+        print("USAGE: python3 server.py " + " <Server Port>")
         sys.exit()
 
     serverPort = sys.argv[1]
