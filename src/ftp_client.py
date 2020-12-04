@@ -1,19 +1,39 @@
 import socket
-import os
-import sys
 from util import *
 
+# logger for FTP client program
 clientLogger = setup_logger()
 
 class FTPClient():
+    """ Implementation for FTP client. The command accepted are:
+        get, put, ls and quit. FTP client has two sockets: control
+        socket is used for control channel, data socket is used for
+        data channel. Commands are sent to FTP server by control 
+        channel, data are sent to and received from FTP server by
+        data channel.
+    """
 
     def __init__(self, serverName, serverPort):
-        self.__serverName    = serverName
-        self.__serverPort    = int(serverPort)
-        self.__sendSocket    = None
+        self.__serverName      = serverName
+        self.__serverPort      = int(serverPort)
+        self.__dataChannelPort = None
+        self.__dataChannelSocket    = None
+        self.__controlChannelSocket = None
 
-    def __sendData(self, dataStr, commandStr, filenameStr):
-        clientLogger.debug("Sending data to FTP server for command %s", commandStr)
+    def __sendControlData(self, commandStr, filenameStr):
+        """ Send control request with data to FTP server.
+            The control request format is: 
+            command(5 bytes) + clientDataChannelPort(5 bytes) + filenameLength(5 bytes) + filename(optional)
+
+            :param commandStr:  <string> Command send to FTP server.
+            :param filenameStr: <string> The filename to upload or download from FTP server
+                                for ls command, the filename is an empty string. 
+
+            :returns <boolean>: return True if successfully send control data to FTP server, 
+                                otherwise return False
+        """
+
+        clientLogger.debug("Sending control data to FTP server...")
 
 		# Prepend spaces to the command string
 		# until the size is 5 bytes
@@ -21,70 +41,140 @@ class FTPClient():
         while commandLen < 5:
             commandStr = " " + commandStr
             commandLen = len(commandStr)    
-        clientLogger.debug("CommandStr to send is \"%s\"", commandStr)
+        clientLogger.debug("Command will send to server is \"%s\"", commandStr)
 
-        if commandStr.strip() == "get" or commandStr.strip() == "put":
-            # Prepend spaces to the filename string
-            # until the size is 30 bytes
-            filenameLen = len(filenameStr)
+        # Prepend 0's to the data channel port
+        # until the size is 5 bytes
+        dataChannelPortStr = str(self.__dataChannelPort)
+        clientLogger.debug("FTP client data channel port is: %s", dataChannelPortStr)
+        while len(dataChannelPortStr) < 5:
+            dataChannelPortStr = "0" + dataChannelPortStr
 
-            if filenameLen > 50:
-                clientLogger.Error("Error: filename too long, maximum filename length is 50")
-                return
+        # Prepend 0's to the filename size string
+        # until the size is 5 bytes
+        filenameLen = len(filenameStr)
+        filenameLenStr = str(filenameLen)
+        clientLogger.debug("Filename length is: %s", filenameLenStr)
+        while len(filenameLenStr) < 5:
+            filenameLenStr = "0" + filenameLenStr
+        
+        #assemble control data send to FTP server
+        controlDataStr = ""
+        if commandStr.strip() == "ls":
+            controlDataStr = commandStr + dataChannelPortStr
+        elif commandStr.strip() == "get" or commandStr.strip() == "put":
+            controlDataStr = commandStr + dataChannelPortStr + filenameLenStr + filenameStr
 
-            while filenameLen < 50:
-                filenameStr = " " + filenameStr
-                filenameLen = len(filenameStr)
-            
-            clientLogger.debug("filenameLen is: %d", filenameLen)
+        #send control data to FTP server
+        dataToSend = controlDataStr.encode()
+        sentDataLen = 0
+        clientLogger.debug("Total size of control data will send to FTP server is: %d", len(dataToSend))
+        while sentDataLen < len(dataToSend):
+            clientLogger.debug("Sending control data to FTP server...")
+            try:
+                sentDataLen += self.__controlChannelSocket.send(dataToSend[sentDataLen:])
+            except Exception as e:
+                clientLogger.error(e)
+                return False
+            clientLogger.debug("Size of data sent to FTP server: %d", sentDataLen)
+
+        return True
+
+    def __sendFileData(self, dataStr, serverSocket):
+        """ Send file data to FTP server in a upload request.
+            The file request format is: filesize(10 bytes) + filedata
+
+            :param dataStr: <string> The file data send to FTP server. 
+
+            :returns <tuple>: return a tuple of (True, dataSizeSent) if successfully send file data to FTP server, 
+                                otherwise return (False, dataSizeSend)
+        """
+
+        clientLogger.debug("Sending file data to FTP server...")
 
 		# Prepend 0's to the size string
 		# until the size is 10 bytes
         dataLen = len(dataStr)
         dataLenStr = str(dataLen)
-        clientLogger.debug("dataLenStr is: %s", dataLenStr)
+        clientLogger.debug("Size of data to send to FTP server is: %s", dataLenStr)
         while len(dataLenStr) < 10:
             dataLenStr = "0" + dataLenStr
         
-        if commandStr.strip() == "ls":
-            dataStr = commandStr
-        elif commandStr.strip() == "get":
-            dataStr = commandStr + filenameStr
-        elif commandStr.strip() == "put":
-            dataStr = commandStr + filenameStr + dataLenStr + dataStr
+        #assemble data to send to FTP server
+        dataStr = dataLenStr + dataStr
 
+        #send data to FTP server
         dataToSend = dataStr.encode()
         sentDataLen = 0
-        clientLogger.debug("Size of total data to send to FTP server: %d", len(dataStr))
+        clientLogger.debug("Size of total data to send to FTP server: %d", len(dataToSend))
         while sentDataLen < len(dataToSend):
-            clientLogger.debug("Begin to send data to FTP server")
             try:
-                sentDataLen += self.__sendSocket.send(dataToSend[sentDataLen:])
+                sentDataLen += serverSocket.send(dataToSend[sentDataLen:])
             except Exception as e:
-                self.__sendSocket.close()
                 clientLogger.error(e)
-                return
+                return False, sentDataLen
             clientLogger.debug("Size of data sent to FTP server: %d", sentDataLen)
 
-    def __receiveData(self):
-        fileData = ""	
+        return True, len(dataToSend)
+
+    def __receiveControlData(self):
+        """ Receive control response from FTP server.
+            The control response format is:
+            statusCode(3 bytes) + messageSize(10 bytes) + message
+
+            :returns <tuple>: a tuple of response status code and server message.
+        """
+        serverMsg = ""	
+        
+        # The buffer containing the request status code from FTP server
+        statusCodeStr =  self.__recvAll(3, self.__controlChannelSocket)
+            
+        # Get the status
+        statusCode = int(statusCodeStr)
+        
+        clientLogger.debug("The FTP server response status code is %d", statusCode)
+        
+        # The buffer containing the server response message size
+        msgSizeStr =  self.__recvAll(5, self.__controlChannelSocket)
+            
+        # Get the server response message size
+        msgSize = int(msgSizeStr.strip())
+        
+        clientLogger.debug("The FTP server response message size is %d", msgSize)
+        
+        # Get the server response message
+        serverMsg = self.__recvAll(msgSize, self.__controlChannelSocket)
+
+        return statusCode, serverMsg
+
+    def __receiveFileData(self, serverSocket):
+        """ Receive file data from FTP server in a download request.
+
+            :returns <tuple>: A tuple contains the downloaded file data and download data size.
+        """
+
+        receivedData = ""	
         
         # The buffer containing the file size
-        fileSize =  self.__recvAll(10, self.__sendSocket)
+        dataSize =  self.__recvAll(10, serverSocket)
             
         # Get the file size
-        fileSize = int(fileSize.strip())
+        dataSize = int(dataSize.strip())
         
-        clientLogger.debug("The file size is %d", fileSize)
+        clientLogger.debug("The file size is %d", dataSize)
         
         # Get the file data
-        fileData = self.__recvAll(fileSize, self.__sendSocket)
+        receivedData = self.__recvAll(dataSize, serverSocket)
         
         clientLogger.debug("All file data received.")
 
-        return fileData
+        return receivedData, dataSize
 
-    def __recvAll(self, receiveByteLen, serverSocket):
+    def __recvAll(self, receiveByteLen, socket):
+        """ Receive data from the given socket.
+
+            :returns <string>: the decoded received data.
+        """
 
         # The buffer
         recvBuff = ""
@@ -96,7 +186,7 @@ class FTPClient():
         while len(recvBuff) < receiveByteLen:
             
             # Attempt to receive bytes
-            tmpBuff = serverSocket.recv(receiveByteLen).decode()
+            tmpBuff = socket.recv(receiveByteLen).decode()
             
             # The other side has closed the socket
             if not tmpBuff:
@@ -107,84 +197,296 @@ class FTPClient():
         
         return recvBuff
 
-    def __uploadFile(self, filename):
+    def __uploadFile(self, filename, serverSocket):
+        """ Upload file to FTP server.
+
+            :param filename: <string> the filename of the file to be uploaded to 
+                             FTP server.
+
+            :returns <boolean>: return True if successfully uploaded file to FTP server, 
+                                otherwise return False
+        """
+
         try:
-            print("Uploading file \"" + filename + "\" to FTP server...")
+            print("\nUploading file \"" + filename + "\" to FTP server...")
+            #open file, read the content of file and send to FTP server
             with open("./ClientFiles/upload/" + filename, 'r') as file:
+                #read file
                 data = file.read()
-                self.__sendData(data, "put", filename) 
-            print("Upload succeeded.") 
+                #send file to FTP server
+                isFileDataSent, dataSizeSent = self.__sendFileData(data, serverSocket)
+                if isFileDataSent == True:
+                    print("\nSUCCESS: File {} uploaded. Sent {} bytes to FTP server total.".format(filename, dataSizeSent)) 
+                    return True
+                else:
+                    print("File data failed to upload to FTP server.")
+                    return False
         except Exception as e:
-            clientLogger.error(e) 
+            clientLogger.error(e)
+            return False
 
 
-    def __downloadFile(self, filename):
+
+    def __downloadFile(self, filename, serverSocket):
+        """ Download file from FTP server.
+
+            :param filename: <string> the filename of the file to be downlowded from 
+                             FTP server.
+
+            :returns <boolean>: return True if successfully download file from FTP server, 
+                                otherwise return False
+        """
+
         try:
-            print("Downloading file \"" + filename + "\" from FTP server...", filename)
-            self.__sendData("", "get", filename)
-            fileData = self.__receiveData()
+            print("\nDownloading file \"" + filename + "\" from FTP server...")
+            #receive file data from FTP server
+            fileData, fileDataSize = self.__receiveFileData(serverSocket)
+            #create a file and write the downloaded file data
             with open("./ClientFiles/download/" + filename, 'w') as file:
                 file.write(fileData) 
-            print("Download succeeded. File stored at directory /ClientFiles/download.")  
+            print("\nSUCCESS: File {} downloaded. Received {} bytes total from FTP server. File stored at directory /ClientFiles/download.".format(filename, fileDataSize)) 
+            return True 
         except Exception as e:
-            clientLogger.error(e) 
+            clientLogger.error(e)
+            return False
 
-    def __listServerFiles(self):
-        self.__sendData("", "ls", "")
+    def __listServerFiles(self, serverSocket):
+        """ Print the list of files available on FTP server.
+    
+            :returns <boolean>: return True if successfully retrieved file list on FTP server, 
+                                otherwise return False
+        """
+
         try:
-            serverFileInfo = self.__receiveData()
+            #retrieve file list on FTP server
+            serverFileInfo, _ = self.__receiveFileData(serverSocket)
+            print("\nSUCCESS: Files on FTP server are")
+            print(serverFileInfo)
+            return True
         except Exception as e:
             print(e)
-            return
-
-        print("Files on FTP server are:")
-        print(serverFileInfo)
-
-    def __createSocket(self):
-        so = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        return so
-
-    def __initSendSocket(self):
-        self.__sendSocket = self.__createSocket()
-        self.__sendSocket.connect((self.__serverName, self.__serverPort))
-        clientLogger.debug("Client send socket created.")
-
-    def __destroySendSocket(self):
-        self.__sendSocket = None 
-        clientLogger.debug("Client send socket destroyed.") 
-
+            return False
 
     def executeControlCommand(self, command):
+        """ Execute the command from user input.
+    
+            :param command: <string> the user input command.
+            :returns <boolean>: return True if FTP client need to be stopped, 
+                                otherwise return False
+        """
+
+        #flag indicate if the FTP client need to be quit
         willStopClient = False
 
+        #get user input command
         operation = command[0]
         clientLogger.debug("Received client command: %s", operation)
 
+        if self.__controlChannelSocket == None and operation != "quit":
+            self.__initControlSocket()
+
         if len(command) == 2:
+            #get user input filename
             filename = command[1]
+
+            #create data channel socket
+            self.__initDataSocket()
+
+            #execute get command and download file from FTP server
             if operation == "get":
-                self.__initSendSocket()
-                self.__downloadFile(filename)
-                self.__destroySendSocket()
+
+                #send control data to control channel
+                isControlDataSent = self.__sendControlData(operation, filename)
+                if isControlDataSent == True:
+                    #get FTP server response
+                    statusCode, msg = self.__receiveControlData()
+                    if statusCode == 0:
+                        print("\nFTP server response: {}".format(msg))
+
+                        # Accept server connections to data channel
+                        serverSocket = None
+                        serverAddr = None
+                        try:
+                            serverSocket,serverAddr = self.__dataChannelSocket.accept()
+                            clientLogger.debug("Accepted connection from server %s at port %d", serverAddr[0], serverAddr[1])
+
+                            #download file from FTP server
+                            isDownloadSucceed = self.__downloadFile(filename, serverSocket)
+
+                            #if download success, get response message from FTP server
+                            if isDownloadSucceed == True:
+                                statusCode, msg = self.__receiveControlData()
+                                if statusCode == 0:
+                                    print("\nFTP server response: {}".format(msg))
+                                else:
+                                    print("\nFTP server response: {}".format(msg))
+
+                            serverSocket.close()
+                        except Exception as e:
+                            serverSocket.close()
+                            self.__destroyDataSocket()
+                            clientLogger.error(e)
+                            return
+                    else:
+                        print("\nFTP server response: {}".format(msg))
+
+                else:
+                    print("\nFailed to send control data of command {} to FTP server.".format(operation))
+
+            #execute put command and upload file to FTP server
             elif operation == "put":
-                self.__initSendSocket()
-                self.__uploadFile(filename)
-                self.__destroySendSocket()
+                #send control data to control channel
+                isControlDataSent = self.__sendControlData(operation, filename)
+                if isControlDataSent == True:
+                    #get FTP server response
+                    statusCode, msg = self.__receiveControlData()
+                    if statusCode == 0:
+                        print("\nFTP server response: {}".format(msg))
+
+                        # Accept server connections to data channel
+                        serverSocket = None
+                        serverAddr = None
+                        try:
+                            serverSocket,serverAddr = self.__dataChannelSocket.accept()
+                            clientLogger.debug("Accepted connection from server %s at port %d", serverAddr[0], serverAddr[1])
+
+                            #upload file to FTP server
+                            isUploadSucceed = self.__uploadFile(filename, serverSocket)
+
+                            #if download success, get response message from FTP server
+                            if isUploadSucceed == True:
+                                statusCode, msg = self.__receiveControlData()
+                                if statusCode == 0:
+                                    print("\nFTP server response: {}".format(msg))
+                                else:
+                                    print("\nFTP server response: {}".format(msg))
+
+                            serverSocket.close()
+                        except Exception as e:
+                            serverSocket.close()
+                            self.__destroyDataSocket()
+                            clientLogger.error(e)
+                            return
+                    else:
+                        print("\nFTP server response: {}".format(msg))
+                else:
+                    print("\nFailed to send control data of command {} to FTP server.".format(operation))
+
+            #destroy data channel socket
+            self.__destroyDataSocket()
+        
+        #execute ls command and get file list on FTP server
         else:
             if operation == "ls":
-                self.__initSendSocket()
-                self.__listServerFiles()
-                self.__destroySendSocket()
+                #create data channel socket
+                self.__initDataSocket()
+
+                #send control data to control channel
+                isControlDataSent = self.__sendControlData(operation, "")
+                if isControlDataSent == True:
+                    #get FTP server response
+                    statusCode, msg = self.__receiveControlData()
+                    if statusCode == 0:
+                        print("\nFTP server response: {}".format(msg))
+
+                        # Accept server connections to data channel
+                        serverSocket = None
+                        serverAddr = None
+                        try:
+                            serverSocket,serverAddr = self.__dataChannelSocket.accept()
+                            clientLogger.debug("Accepted connection from server %s at port %d", serverAddr[0], serverAddr[1])
+
+                            #get file list from FTP server
+                            isListFileSucceed = self.__listServerFiles(serverSocket)
+
+                            #if download success, get response message from FTP server
+                            if isListFileSucceed == True:
+                                statusCode, msg = self.__receiveControlData()
+                                if statusCode == 0:
+                                    print("FTP server response: {}".format(msg))
+                                else:
+                                    print("FTP server response: {}".format(msg))
+
+                            serverSocket.close()
+                        except Exception as e:
+                            serverSocket.close()
+                            self.__destroyDataSocket()
+                            clientLogger.error(e)
+                            return
+                    else:
+                        print("\nFTP server response: {}".format(msg))
+                else:
+                    print("\nFailed to send control data of command {} to FTP server.".format(operation))
+
+                #destroy data channel socket
+                self.__destroyDataSocket()
+
+            #execute quit command and terminate the FTP client
             elif operation == "quit":
                 self.stop()
                 willStopClient = True
 
+        if self.__controlChannelSocket != None:
+            self.__destroyControlSocket()
+
         return willStopClient
 
-    def start(self):
-        if self.__sendSocket == None:
-            self.__initSendSocket()
+    def __createSocket(self):
+        """ Creating a TCP socket.
+        """
+
+        so = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        return so
+
+    def __initControlSocket(self):
+        """ Create and initialize the client control channel socket.
+        """
+
+        #create control channel socket
+        self.__controlChannelSocket = self.__createSocket()
+        #connect the control channel socket to FTP server
+        self.__controlChannelSocket.connect((self.__serverName, self.__serverPort))
+        clientLogger.debug("Control socket created.")
+
+    def __initDataSocket(self):
+        """ Create and initialize the client data channel socket.
+        """
+
+        #create data channel socket
+        self.__dataChannelSocket = self.__createSocket()
+        clientLogger.debug("Data channel socket created.")
+
+        #bind the data channel socket to a ephemeral port
+        self.__dataChannelSocket.bind(("localhost", 0))
+        #get the ephemeral port
+        self.__dataChannelPort = self.__dataChannelSocket.getsockname()[1]
+        clientLogger.debug("Data channel socket binded to port %d",  self.__dataChannelPort)
+
+        #data channel socket listen for connection
+        self.__dataChannelSocket.listen(1)
+
+    def __destroyControlSocket(self):
+        """ Destroy the client control channel socket.
+        """
+
+        self.__controlChannelSocket.close()
+        self.__controlChannelSocket = None 
+        clientLogger.debug("Control channel socket destroyed.") 
+
+    def __destroyDataSocket(self):
+        """ Destroy the client data channel socket.
+        """
+
+        self.__dataChannelSocket.close()
+        self.__dataChannelSocket = None 
+        clientLogger.debug("Data channel socket destroyed.")
 
     def stop(self):
-        if self.__sendSocket != None:
-            self.__destroySendSocket()
+        """ Stop the FTP client.
+        """
+
+        if self.__controlChannelSocket != None:
+            self.__destroyControlSocket()
+
+        if self.__dataChannelSocket != None:
+            self.__destroyDataSocket()

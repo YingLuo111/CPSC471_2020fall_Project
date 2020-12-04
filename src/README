@@ -12,4 +12,17 @@ python3 server.py 5000
 python3 cli.py <Server IP Address> <Server Port Number>
 
 E.g.
-python3 cli.py 127.0.0.1 5000
+python3 server.py 127.0.0.1 5000
+
+*************************
+* How to upload a file  *
+*************************
+The file to upload need to be reside in 
+folder /ClientFiles/upload. Otherwise the cli.py
+program will failed to find the file to upload.
+
+Then start the client program by:
+python3 cli.py <Server IP Address> <Server Port Number>
+
+And use the put command as
+>ftp put <filename to upload>
