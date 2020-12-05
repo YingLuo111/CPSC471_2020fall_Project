@@ -16,7 +16,7 @@ def startClient(client, serverName, serverPort):
     #accepting user command until quit program
     while willExit != True:
         #ask user for command input
-        commandStr = input("\n>ftp ")
+        commandStr = input("\nftp> ")
 
         clientLogger.debug("Input command is: %s", commandStr)
         

@@ -1,18 +1,48 @@
-*************************
-* How to run FTP server *
-*************************
-python3 server.py <Port Number>
 
-E.g. 
-python3 server.py 5000
+**************************
+*      Team Members      *
+**************************
+    NAME               EMAIL
+Ying Luo           yingluo_holiday@csu.fullerton.edu
+Jose Alvarado      xxjose0xx@csu.fullerton.edu
+Collin Campbell    ccampbell97@csu.fullerton.edu
+Joseph Hoang       nhoang53@csu.fullerton.edu
 
-*************************
-* How to run FTP client *
-*************************
-python3 cli.py <Server IP Address> <Server Port Number>
 
-E.g.
-python3 server.py 127.0.0.1 5000
+**************************
+*  Programming Language  *
+**************************
+Python3
+
+**************************
+* How to run the program *
+**************************
+Prerequisite:
+   Linux commands:
+   Make sure python3 is installed on your computer, can verify with command
+        $ python3 --version 
+   If not installed then install with commands
+        $ sudo apt-get update
+        $ sudo apt-get install python3.8 python3-pip
+
+
+After python3 is installed, navigate to the src folder and then run the following
+First run the FTP server by doing the following:
+    $ python3 serv.py <Port Number>
+
+    E.g. 
+    $ python3 serv.py 5000
+
+
+Second run the FTP client by doing the following:
+
+    $ python3 cli.py <Server Machine> <Server Port Number>
+
+    E.g.
+    $ python3 cli.py localhost 5000
+
+Note: the port number should be the same for both the server and client.
+
 
 *************************
 * How to upload a file  *
@@ -22,7 +52,10 @@ folder /ClientFiles/upload. Otherwise the cli.py
 program will failed to find the file to upload.
 
 Then start the client program by:
-python3 cli.py <Server IP Address> <Server Port Number>
+python3 cli.py <Server Machine> <Server Port Number>
 
 And use the put command as
->ftp put <filename to upload>
+    ftp> put <filename to upload>
+
+    Ε.g.
+    ftp> put alice.txt
