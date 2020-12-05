@@ -43,8 +43,9 @@ Second run the FTP client by doing the following:
 
 Note: the port number should be the same for both the server and client.
 
-After both serv.py and cli.py are running then on the client terminal you can begin to run the needed Commands such as ls, get, put and quit.  When using get and put you will also need to put in the file name.
-
+After both serv.py and cli.py are running then on the client terminal you can begin to 
+run the needed Commands such as ls, get, put and quit.  When using get and put you will 
+also need to put in the file name.
 
 *************************
 * How to upload a file  *
