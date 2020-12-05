@@ -120,7 +120,7 @@ class FTPClient():
     def __receiveControlData(self):
         """ Receive control response from FTP server.
             The control response format is:
-            statusCode(3 bytes) + messageSize(10 bytes) + message
+            statusCode(3 bytes) + messageSize(5 bytes) + message
 
             :returns <tuple>: a tuple of response status code and server message.
         """
