@@ -47,12 +47,12 @@ def validate(commandArgs):
         return False
 
     #check if the command is valid
-    if commandArgs[0] not in ['get', 'put', 'ls', 'quit']:
+    if commandArgs[0].strip() not in ['get', 'put', 'ls', 'quit']:
         clientLogger.error("Command not valid, unknown command. \nUsage: \nget <filename>\nput <filename>\nls\nquit")
         return False
 
     #if there is any argument followed by the command, check if it's valid
-    if commandArgs[0] in ['ls', 'quit'] and len(commandArgs) > 1:
+    if commandArgs[0].strip() in ['ls', 'quit'] and len(commandArgs) > 1:
         clientLogger.error("Command not valid, ls and quit command don't have arguments. \nUsage: \nget <filename>\nput <filename>\nls\nquit")
         return False
 

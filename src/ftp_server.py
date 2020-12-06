@@ -100,83 +100,84 @@ class FTPServer():
         clientAddr = None
         try:
             clientSocket,clientAddr = self.__controlChannelSocket.accept()
+
+            serverLogger.debug("Accepted connection from server %s at port %d", clientAddr[0], clientAddr[1])
+            self.__clientAddr = clientAddr[0]
+
+            #receive client command
+            command = self.__recvAll(5, clientSocket)
+            command = command.strip()
+
+            #receive client data channel port
+            self.__clientDataChannelPort = int(self.__recvAll(5, clientSocket))
+
+            #handle client requests based on request command
+            serverLogger.debug("Command reveived from FTP client is: \"%s\"", command)
+            if command == "get":
+                #receive filename length
+                filenameSize = int(self.__recvAll(5, clientSocket))
+                #receive filename to download
+                filename = self.__recvAll(filenameSize, clientSocket)
+                serverLogger.info("Received downloading file request from client %s. File to download: %s", clientAddr[0], filename)
+                #check if the request file is existing on FTP server
+                if self.__validateFilename(filename) == True:
+                    #send control response to indicate the request is accepted
+                    self.__sendControlResponse(0, "Download request accepted by FTP Server.", clientSocket)
+                    try:
+                        #send file to FTP client
+                        self.__sendFile(filename)
+                        #send control response to indicate completed handle the client request
+                        self.__sendControlResponse(0, "Download request Completed.", clientSocket)
+                        serverLogger.info("SUCCESS: Finished processing client download request.")
+                    except Exception as e:
+                        self.__sendControlResponse(1, "Download request failed when receiving file data from client.", clientSocket)
+                        serverLogger.error("FAILURE: Download request failed when receiving file data from client with error:")
+                        serverLogger.error(e)  
+                        clientSocket.close() 
+                else:
+                    #send control response to indicate the request failed
+                    self.__sendControlResponse(2, "Download request refused by FTP Server, file not existing on server.", clientSocket)
+                    serverLogger.error("FAILURE: Failed to process FTP client download request, file %s not existing on Server.", filename)
+
+            elif command == "put":
+                #receive filename length
+                filenameSize = int(self.__recvAll(5, clientSocket))
+                #receive filename to upload
+                filename = self.__recvAll(filenameSize, clientSocket)
+                serverLogger.info("Received uploading file request from client %s. File to upload: %s", clientAddr[0], filename)
+                #send control response to indicate the request is accepted
+                self.__sendControlResponse(0, "Upload request accepted by FTP Server.", clientSocket)
+                try:
+                    self.__receiveFile(filename)
+                    #send control response to indicate completed handle the client request
+                    self.__sendControlResponse(0, "Upload request Completed.", clientSocket)
+                    serverLogger.info("SUCCESS: Finished processing client upload request. Uploaded file stored at directory /ServerFiles.")
+                except Exception as e:
+                    self.__sendControlResponse(3, "Upload request failed when sending file data to client.", clientSocket)
+                    serverLogger.error("FAILURE: Upload request failed when sending file data to client with error:")
+                    serverLogger.error(e)
+                    clientSocket.close()
+            elif command == "ls":
+                #send control response to indicate the request is accepted
+                self.__sendControlResponse(0, "List server file request accepted by FTP Server.", clientSocket)
+                serverLogger.info("Received list server files request from client %s.", clientAddr[0])
+                try: 
+                    self.__sendServerFileList()
+                    #send control response to indicate completed handle the client request
+                    self.__sendControlResponse(0, "List server file request Completed.", clientSocket)
+                    serverLogger.info("SUCCESS: Finished processing client list files request.")
+                except Exception as e:
+                    self.__sendControlResponse(4, "List server file failed when sending file lists to client.", clientSocket)
+                    serverLogger.error("FAILURE: List server file request failed when sending file list data to client with error:")
+                    serverLogger.error(e)
+                    clientSocket.close()
+
+            clientSocket.close()
+
         except Exception as e:
             clientSocket.close()
             serverLogger.error(e)
             return
-
-        serverLogger.debug("Accepted connection from server %s at port %d", clientAddr[0], clientAddr[1])
-        self.__clientAddr = clientAddr[0]
-
-        #receive client command
-        command = self.__recvAll(5, clientSocket)
-        command = command.strip()
-
-        #receive client data channel port
-        self.__clientDataChannelPort = int(self.__recvAll(5, clientSocket))
-
-        #handle client requests based on request command
-        serverLogger.debug("Command reveived from FTP client is: \"%s\"", command)
-        if command == "get":
-            #receive filename length
-            filenameSize = int(self.__recvAll(5, clientSocket))
-            #receive filename to download
-            filename = self.__recvAll(filenameSize, clientSocket)
-            serverLogger.info("Received downloading file request from client %s. File to download: %s", clientAddr[0], filename)
-            #check if the request file is existing on FTP server
-            if self.__validateFilename(filename) == True:
-                #send control response to indicate the request is accepted
-                self.__sendControlResponse(0, "Download request accepted by FTP Server.", clientSocket)
-                try:
-                    #send file to FTP client
-                    self.__sendFile(filename)
-                    #send control response to indicate completed handle the client request
-                    self.__sendControlResponse(0, "Download request Completed.", clientSocket)
-                    serverLogger.info("SUCCESS: Finished processing client download request.")
-                except Exception as e:
-                    self.__sendControlResponse(1, "Download request failed when receiving file data from client.", clientSocket)
-                    serverLogger.error("FAILURE: Download request failed when receiving file data from client with error:")
-                    serverLogger.error(e)  
-                    clientSocket.close() 
-            else:
-                #send control response to indicate the request failed
-                self.__sendControlResponse(2, "Download request refused by FTP Server, file not existing on server.", clientSocket)
-                serverLogger.error("FAILURE: Failed to process FTP client download request, file %s not existing on Server.", filename)
-
-        elif command == "put":
-            #receive filename length
-            filenameSize = int(self.__recvAll(5, clientSocket))
-            #receive filename to upload
-            filename = self.__recvAll(filenameSize, clientSocket)
-            serverLogger.info("Received uploading file request from client %s. File to upload: %s", clientAddr[0], filename)
-            #send control response to indicate the request is accepted
-            self.__sendControlResponse(0, "Upload request accepted by FTP Server.", clientSocket)
-            try:
-                self.__receiveFile(filename)
-                #send control response to indicate completed handle the client request
-                self.__sendControlResponse(0, "Upload request Completed.", clientSocket)
-                serverLogger.info("SUCCESS: Finished processing client upload request. Uploaded file stored at directory /ServerFiles.")
-            except Exception as e:
-                self.__sendControlResponse(3, "Upload request failed when sending file data to client.", clientSocket)
-                serverLogger.error("FAILURE: Upload request failed when sending file data to client with error:")
-                serverLogger.error(e)
-                clientSocket.close()
-        elif command == "ls":
-            #send control response to indicate the request is accepted
-            self.__sendControlResponse(0, "List server file request accepted by FTP Server.", clientSocket)
-            serverLogger.info("Received list server files request from client %s.", clientAddr[0])
-            try: 
-                self.__sendServerFileList()
-                #send control response to indicate completed handle the client request
-                self.__sendControlResponse(0, "List server file request Completed.", clientSocket)
-                serverLogger.info("SUCCESS: Finished processing client list files request.")
-            except Exception as e:
-                self.__sendControlResponse(4, "List server file failed when sending file lists to client.", clientSocket)
-                serverLogger.error("FAILURE: List server file request failed when sending file list data to client with error:")
-                serverLogger.error(e)
-                clientSocket.close()
-
-        clientSocket.close()
 
     def __recvAll(self, receiveByteLen, socket):
         """ Receive data from the given socket, the socket can be 
@@ -219,8 +220,10 @@ class FTPServer():
         """
         proc = subprocess.Popen(["ls ./ServerFiles"], shell=True, stdout=subprocess.PIPE)
         fileListStr = proc.stdout.read().decode()
+    
+        fileList = fileListStr.split("\n")
 
-        return True if filename in fileListStr else False
+        return True if filename in fileList else False
 
     def __sendFile(self, filename):
         """ Send file to FTP client via data channel
